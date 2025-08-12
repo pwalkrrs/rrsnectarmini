@@ -13,11 +13,14 @@
     html, body {
       margin: 0; padding: 0;
       width: 100%; height: 100%;
-      background: #ff6b14;
+      background: #f55838;
       color: #fff;
       overflow: hidden;
       display: flex; justify-content: center; align-items: center;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      cursor: pointer;
+      /* This transition is the key! We need to wait for it to finish. */
+      transition: background-color 0.5s ease-in-out;
     }
 
     #display-area {
@@ -49,7 +52,6 @@
     }
 
     .recipient {
-      /* MODIFIED: Reduced the maximum and viewport-based font size for the recipient's name */
       font-size: clamp(2rem, 8vw, 6rem); 
       font-weight: 800;
       letter-spacing: -0.02em;
@@ -61,7 +63,6 @@
       line-height: 1.1;
       font-weight: 600;
       width: 100%;
-      /* MODIFIED: Set a max-height to ensure the message text container doesn't overflow */
       max-height: 70%; 
       display: flex;
       justify-content: center;
@@ -105,6 +106,12 @@
         color: #fff;
     }
     
+    #display-area img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+    }
+
   </style>
 </head>
 <body>
@@ -122,6 +129,7 @@
     const SENDER_DISPLAY_TIME = 4000;
     const FADE_TIME = 800;
     const RETRY_DELAY = 5000;
+    const GIF_DISPLAY_TIME = 2000;
 
     let shoutouts = [], idx = 0;
     let isFetching = false;
@@ -163,17 +171,12 @@
         });
     }
     
-    /**
-     * MODIFIED: Enhanced font size adjustment for better scaling.
-     * This function now reduces font size more aggressively to fit overflowing content.
-     */
     function adjustFontSize(element) {
         const container = element.parentElement;
         let fontSize = parseFloat(window.getComputedStyle(element).fontSize);
         
-        // Added a check for clientWidth to handle horizontal overflow as well
-        while ((element.scrollHeight > container.clientHeight || element.scrollWidth > container.clientWidth) && fontSize > 10) {
-            fontSize -= 2; // MODIFIED: Increased decrement step for faster scaling
+        while ((element.scrollHeight > container.clientHeight || element.scrollWidth > container.clientWidth) && fontSize > 8) {
+            fontSize -= 1;
             element.style.fontSize = `${fontSize}px`;
         }
     }
@@ -231,9 +234,8 @@
             wrapper.appendChild(combinedContentWrapper);
             displayArea.appendChild(wrapper);
             
-            // Run font size adjustment after the elements are in the DOM
             adjustFontSize(messageEl);
-            adjustFontSize(recipientEl); // Also adjust recipient font size if needed
+            adjustFontSize(recipientEl);
 
             setTimeout(() => {
                 wrapper.classList.add('visible');
@@ -277,8 +279,50 @@
 
             await runStep(footerEl, SENDER_DISPLAY_TIME, true);
         }
+    }
 
-        cycle();
+    // MODIFIED: This function now waits for the background color transition to finish
+    // before showing the GIF, preventing a visual glitch.
+    function playGifAnimation() {
+        return new Promise(resolve => {
+            const displayArea = document.getElementById('display-area');
+            const backgroundTransitionDuration = 500; // This must match the CSS transition time for the body
+
+            // Start the background transition to white
+            document.body.style.backgroundColor = '#ffffff';
+
+            // Wait for the background to turn fully white before proceeding
+            setTimeout(() => {
+                displayArea.innerHTML = '';
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'content-wrapper';
+
+                const gif = document.createElement('img');
+                gif.src = 'https://raw.githubusercontent.com/pwalkrrs/rrsnectarmini/main/nectarmini.gif?t=' + Date.now();
+                
+                wrapper.appendChild(gif);
+                displayArea.appendChild(wrapper);
+
+                // Fade in the GIF
+                setTimeout(() => {
+                    wrapper.classList.add('visible');
+                }, 100);
+
+                // Set a timer to fade out the GIF
+                setTimeout(() => {
+                    wrapper.classList.remove('visible');
+
+                    // After the fade out, change the background color back to orange
+                    setTimeout(() => {
+                        document.body.style.backgroundColor = '#f55838';
+                        displayArea.innerHTML = '';
+                        resolve();
+                    }, FADE_TIME);
+                }, GIF_DISPLAY_TIME);
+
+            }, backgroundTransitionDuration);
+        });
     }
 
     async function cycle() {
@@ -295,13 +339,22 @@
 
       const item = shoutouts[idx];
       console.log(`Showing shoutout ${idx + 1}/${shoutouts.length}`);
-      idx++;
+      
       await showShoutout(item);
+      
+      await playGifAnimation();
+      
+      idx++;
+      cycle();
     }
 
     window.addEventListener('load', () => {
       console.log('Culture Feed Sidebar Display started'); 
       cycle();
+
+      document.body.addEventListener('click', () => {
+        window.open('https://app.nectarhr.com/login', '_blank');
+      });
     });
     
   </script>
