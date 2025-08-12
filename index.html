@@ -13,7 +13,6 @@
     html, body {
       margin: 0; padding: 0;
       width: 100%; height: 100%;
-      /* CHANGED: Set background to orange and default text to white */
       background: #ff6b14;
       color: #fff;
       overflow: hidden;
@@ -50,9 +49,11 @@
     }
 
     .recipient {
-      font-size: clamp(2.5rem, 10vw, 8rem);
+      /* MODIFIED: Reduced the maximum and viewport-based font size for the recipient's name */
+      font-size: clamp(2rem, 8vw, 6rem); 
       font-weight: 800;
       letter-spacing: -0.02em;
+      margin-bottom: 0.25em;
     }
 
     .message-text {
@@ -60,7 +61,8 @@
       line-height: 1.1;
       font-weight: 600;
       width: 100%;
-      height: 100%;
+      /* MODIFIED: Set a max-height to ensure the message text container doesn't overflow */
+      max-height: 70%; 
       display: flex;
       justify-content: center;
       align-items: center;
@@ -81,7 +83,6 @@
       font-size: clamp(1.2rem, 4vw, 3rem);
       font-weight: 300;
       font-style: italic;
-      /* CHANGED: Sender color to transparent white */
       color: rgba(255, 255, 255, 0.9);
     }
     
@@ -97,17 +98,10 @@
       display: inline-block;
     }
 
-    /* CHANGED: Hashtag colors all set to white for readability on orange */
-    .hashtag-be-different {
-        font-size: clamp(2rem, 8vw, 6rem); font-weight: 800;
-        color: #fff;
-    }
-    .hashtag-bring-wow {
-        font-size: clamp(2rem, 8vw, 6rem); font-weight: 800;
-        color: #fff;
-    }
+    .hashtag-be-different,
+    .hashtag-bring-wow,
     .hashtag-build-great {
-        font-size: clamp(1.5rem, 7vw, 5rem); font-weight: 800;
+        font-size: clamp(2rem, 8vw, 6rem); font-weight: 800;
         color: #fff;
     }
     
@@ -124,8 +118,7 @@
     const endpoint = `https://integrations.nectarhr.com/culture-feed?companyId=${companyId}`;
     const headers = { 'Accept': 'application/json', 'a_nectar': aNectarToken };
 
-    const RECIPIENT_DISPLAY_TIME = 2500;
-    const SHOUTOUT_DISPLAY_TIME = 5000;
+    const SHOUTOUT_DISPLAY_TIME = 7500;
     const SENDER_DISPLAY_TIME = 4000;
     const FADE_TIME = 800;
     const RETRY_DELAY = 5000;
@@ -159,11 +152,8 @@
       }
     }
 
-    /**
-     * MODIFIED: Confetti colors updated to match the orange theme.
-     */
     function triggerConfetti() {
-        const confettiColors = ['#ffffff', '#ffde2f', '#c85a11']; // White, Yellow, Dark Orange
+        const confettiColors = ['#ffffff', '#ffde2f', '#c85a11'];
         confetti({
             particleCount: 70,
             spread: 80,
@@ -172,13 +162,18 @@
             scalar: 0.9
         });
     }
-
+    
+    /**
+     * MODIFIED: Enhanced font size adjustment for better scaling.
+     * This function now reduces font size more aggressively to fit overflowing content.
+     */
     function adjustFontSize(element) {
         const container = element.parentElement;
         let fontSize = parseFloat(window.getComputedStyle(element).fontSize);
         
+        // Added a check for clientWidth to handle horizontal overflow as well
         while ((element.scrollHeight > container.clientHeight || element.scrollWidth > container.clientWidth) && fontSize > 10) {
-            fontSize--;
+            fontSize -= 2; // MODIFIED: Increased decrement step for faster scaling
             element.style.fontSize = `${fontSize}px`;
         }
     }
@@ -210,27 +205,40 @@
             });
         };
 
-        // --- Step 1: Show Recipient (with confetti) ---
-        const recipientEl = document.createElement('div');
-        recipientEl.className = 'recipient';
-        recipientEl.textContent = (item.mentionsData[0] && `${item.mentionsData[0].first_name}${item.mentionsData[0].last_name ? ' ' + item.mentionsData[0].last_name : ''}`) || item.sender.first_name;
-        await runStep(recipientEl, RECIPIENT_DISPLAY_TIME, true);
-
-        // --- Step 2: Show Shoutout Message (no confetti) ---
-        const messageEl = document.createElement('div');
-        messageEl.className = 'message-text';
-        let text = item.command.replace(/^@\w+\s*/, '').replace(/#\w+/g, '').replace(/\+\d+\b/g, '').trim();
-        messageEl.textContent = text;
-        
         await new Promise(resolve => {
+            const combinedContentWrapper = document.createElement('div');
+            combinedContentWrapper.style.display = 'flex';
+            combinedContentWrapper.style.flexDirection = 'column';
+            combinedContentWrapper.style.justifyContent = 'center';
+            combinedContentWrapper.style.alignItems = 'center';
+            combinedContentWrapper.style.height = '100%';
+            combinedContentWrapper.style.width = '100%';
+
+            const recipientEl = document.createElement('div');
+            recipientEl.className = 'recipient';
+            recipientEl.textContent = (item.mentionsData[0] && `${item.mentionsData[0].first_name}${item.mentionsData[0].last_name ? ' ' + item.mentionsData[0].last_name : ''}`) || 'To Someone Special';
+
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message-text';
+            let text = item.command.replace(/^@\w+\s*/, '').replace(/#\w+/g, '').replace(/\+\d+\b/g, '').trim();
+            messageEl.textContent = text;
+            
+            combinedContentWrapper.appendChild(recipientEl);
+            combinedContentWrapper.appendChild(messageEl);
+
             const wrapper = document.createElement('div');
             wrapper.className = 'content-wrapper';
-            wrapper.appendChild(messageEl);
+            wrapper.appendChild(combinedContentWrapper);
             displayArea.appendChild(wrapper);
             
+            // Run font size adjustment after the elements are in the DOM
             adjustFontSize(messageEl);
+            adjustFontSize(recipientEl); // Also adjust recipient font size if needed
 
-            setTimeout(() => wrapper.classList.add('visible'), 100);
+            setTimeout(() => {
+                wrapper.classList.add('visible');
+                triggerConfetti();
+            }, 100);
 
             setTimeout(() => {
                 wrapper.classList.remove('visible');
@@ -241,18 +249,18 @@
             }, SHOUTOUT_DISPLAY_TIME);
         });
 
-        // --- Step 3: Show Hashtags & Sender (with confetti) ---
         const tags = item.command.match(/#BeDifferent|#BringTheWow|#BuildSomethingGreatTogether/g) || [];
-        const footerEl = document.createElement('div');
-        footerEl.className = 'footer-content';
-
         if (tags.length > 0) {
+            const footerEl = document.createElement('div');
+            footerEl.className = 'footer-content';
+
             const hashtagContainer = document.createElement('div');
             hashtagContainer.className = 'hashtag-container';
             tags.forEach(tag => {
                 const hashtagEl = document.createElement('div');
                 hashtagEl.className = 'hashtag-word';
-                hashtagEl.textContent = tag.replace(/([A-Z])/g, ' $1').trim();
+                let formattedTag = tag.replace(/([A-Z])/g, ' $1').trim();
+                hashtagEl.textContent = formattedTag;
                 
                 if (tag === '#BeDifferent') hashtagEl.classList.add('hashtag-be-different');
                 else if (tag === '#BringTheWow') hashtagEl.classList.add('hashtag-bring-wow');
@@ -261,14 +269,14 @@
                 hashtagContainer.appendChild(hashtagEl);
             });
             footerEl.appendChild(hashtagContainer);
+
+            const senderEl = document.createElement('div');
+            senderEl.className = 'sender';
+            senderEl.textContent = `— ${item.sender.first_name}${item.sender.last_name ? ' ' + item.sender.last_name : ''}`;
+            footerEl.appendChild(senderEl);
+
+            await runStep(footerEl, SENDER_DISPLAY_TIME, true);
         }
-
-        const senderEl = document.createElement('div');
-        senderEl.className = 'sender';
-        senderEl.textContent = `— ${item.sender.first_name}${item.sender.last_name ? ' ' + item.sender.last_name : ''}`;
-        footerEl.appendChild(senderEl);
-
-        await runStep(footerEl, SENDER_DISPLAY_TIME, true);
 
         cycle();
     }
@@ -276,9 +284,6 @@
     async function cycle() {
       if (idx >= shoutouts.length) {
         idx = 0;
-        shoutouts = [];
-        
-        document.getElementById('display-area').innerHTML = '';
         await fetchShoutouts();
 
         if (shoutouts.length === 0) {
@@ -291,7 +296,7 @@
       const item = shoutouts[idx];
       console.log(`Showing shoutout ${idx + 1}/${shoutouts.length}`);
       idx++;
-      showShoutout(item);
+      await showShoutout(item);
     }
 
     window.addEventListener('load', () => {
