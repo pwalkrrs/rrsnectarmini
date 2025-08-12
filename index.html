@@ -19,7 +19,6 @@
       display: flex; justify-content: center; align-items: center;
       font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       cursor: pointer;
-      /* This transition is the key! We need to wait for it to finish. */
       transition: background-color 0.5s ease-in-out;
     }
 
@@ -50,20 +49,35 @@
         opacity: 1;
         transform: scale(1);
     }
+    
+    .shoutout-main-content {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100%;
+        width: 100%;
+    }
 
     .recipient {
       font-size: clamp(2rem, 8vw, 6rem); 
       font-weight: 800;
       letter-spacing: -0.02em;
       margin-bottom: 0.25em;
+      flex-shrink: 0;
+      width: 100%;
+      overflow: hidden;
     }
 
     .message-text {
-      font-size: 10vh;
+      /* This large size is the default for normal messages */
+      font-size: 5rem; 
       line-height: 1.1;
       font-weight: 600;
       width: 100%;
-      max-height: 70%; 
+      flex: 1 1 0;
+      min-height: 0; 
+      overflow: hidden; 
       display: flex;
       justify-content: center;
       align-items: center;
@@ -73,6 +87,8 @@
     }
 
     .footer-content {
+        width: 100%;
+        height: 100%;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -97,6 +113,7 @@
 
     .hashtag-word {
       display: inline-block;
+      word-break: break-word;
     }
 
     .hashtag-be-different,
@@ -130,6 +147,9 @@
     const FADE_TIME = 800;
     const RETRY_DELAY = 5000;
     const GIF_DISPLAY_TIME = 2000;
+    const MIN_FONT_SIZE = 8;
+    // NEW: A character threshold to trigger the aggressive shrinking.
+    const LONG_MESSAGE_THRESHOLD = 200;
 
     let shoutouts = [], idx = 0;
     let isFetching = false;
@@ -137,21 +157,13 @@
     async function fetchShoutouts() {
       if (isFetching) return;
       isFetching = true;
-      console.log('Fetching new shoutouts...');
       try { 
         const timestamp = Date.now(); 
         const urlWithCacheBuster = `${endpoint}&_t=${timestamp}`; 
         const res = await fetch(urlWithCacheBuster, { headers: { ...headers, 'Cache-Control': 'no-cache' } }); 
         if (!res.ok) throw new Error(`HTTP Status: ${res.status}`); 
         const data = await res.json();
-        
-        if (data.shoutouts && data.shoutouts.length > 0) { 
-          shoutouts = data.shoutouts; 
-          console.log(`Fetched ${shoutouts.length} shoutouts.`); 
-        } else {
-          shoutouts = [];
-          console.log('No new shoutouts found.');
-        }
+        shoutouts = (data.shoutouts && data.shoutouts.length > 0) ? data.shoutouts : [];
       } catch (e) { 
         console.error('Fetch error:', e); 
         shoutouts = [];
@@ -162,23 +174,17 @@
 
     function triggerConfetti() {
         const confettiColors = ['#ffffff', '#ffde2f', '#c85a11'];
-        confetti({
-            particleCount: 70,
-            spread: 80,
-            origin: { y: 0.8 },
-            colors: confettiColors,
-            scalar: 0.9
-        });
+        confetti({ particleCount: 70, spread: 80, origin: { y: 0.8 }, colors: confettiColors, scalar: 0.9 });
     }
     
     function adjustFontSize(element) {
-        const container = element.parentElement;
+        element.style.visibility = 'hidden';
         let fontSize = parseFloat(window.getComputedStyle(element).fontSize);
-        
-        while ((element.scrollHeight > container.clientHeight || element.scrollWidth > container.clientWidth) && fontSize > 8) {
-            fontSize -= 1;
-            element.style.fontSize = `${fontSize}px`;
+        while ((element.scrollHeight > element.clientHeight + 1 || element.scrollWidth > element.clientWidth + 1) && fontSize > MIN_FONT_SIZE) {
+            fontSize--;
+            element.style.fontSize = fontSize + 'px';
         }
+        element.style.visibility = 'visible';
     }
     
     async function showShoutout(item) {
@@ -191,136 +197,119 @@
                 wrapper.appendChild(element);
                 displayArea.appendChild(wrapper);
 
-                setTimeout(() => {
-                    wrapper.classList.add('visible');
-                    if (withConfetti) {
-                        triggerConfetti();
-                    }
-                }, 100);
+                requestAnimationFrame(() => {
+                    const elementsToResize = wrapper.querySelectorAll('.recipient, .message-text, .hashtag-word');
+                    elementsToResize.forEach(adjustFontSize);
+                    
+                    setTimeout(() => {
+                        wrapper.classList.add('visible');
+                        if (withConfetti) triggerConfetti();
+                    }, 50);
+                });
 
                 setTimeout(() => {
                     wrapper.classList.remove('visible');
                     setTimeout(() => {
-                        displayArea.innerHTML = '';
+                        if (displayArea.contains(wrapper)) {
+                            displayArea.removeChild(wrapper);
+                        }
                         resolve();
                     }, FADE_TIME);
                 }, duration);
             });
         };
 
-        await new Promise(resolve => {
-            const combinedContentWrapper = document.createElement('div');
-            combinedContentWrapper.style.display = 'flex';
-            combinedContentWrapper.style.flexDirection = 'column';
-            combinedContentWrapper.style.justifyContent = 'center';
-            combinedContentWrapper.style.alignItems = 'center';
-            combinedContentWrapper.style.height = '100%';
-            combinedContentWrapper.style.width = '100%';
+        const recipientName = (item.mentionsData[0] && `${item.mentionsData[0].first_name}${item.mentionsData[0].last_name ? ' ' + item.mentionsData[0].last_name : ''}`) || 'To Someone Special';
+        const senderName = `— ${item.sender.first_name}${item.sender.last_name ? ' ' + item.sender.last_name : ''}`;
+        const text = item.command.replace(/^@\w+\s*/, '').replace(/#\w+/g, '').replace(/\+\d+\b/g, '').trim();
+        const tags = item.command.match(/#BeDifferent|#BringTheWow|#BuildSomethingGreatTogether/g) || [];
+        
+        const createHashtagEl = (tag) => {
+            const el = document.createElement('div');
+            el.className = 'hashtag-word';
+            if (tag === '#BeDifferent') el.classList.add('hashtag-be-different');
+            else if (tag === '#BringTheWow') el.classList.add('hashtag-bring-wow');
+            else if (tag === '#BuildSomethingGreatTogether') el.classList.add('hashtag-build-great');
+            el.textContent = tag.replace(/([A-Z])/g, ' $1').trim();
+            return el;
+        };
 
+        if (text) {
+            const shoutoutContent = document.createElement('div');
+            shoutoutContent.className = 'shoutout-main-content';
             const recipientEl = document.createElement('div');
             recipientEl.className = 'recipient';
-            recipientEl.textContent = (item.mentionsData[0] && `${item.mentionsData[0].first_name}${item.mentionsData[0].last_name ? ' ' + item.mentionsData[0].last_name : ''}`) || 'To Someone Special';
-
+            recipientEl.textContent = recipientName;
             const messageEl = document.createElement('div');
             messageEl.className = 'message-text';
-            let text = item.command.replace(/^@\w+\s*/, '').replace(/#\w+/g, '').replace(/\+\d+\b/g, '').trim();
             messageEl.textContent = text;
             
-            combinedContentWrapper.appendChild(recipientEl);
-            combinedContentWrapper.appendChild(messageEl);
+            // *** NEW, DIRECT LOGIC ***
+            // If the message is very long, force a much smaller font size as a starting point.
+            // This guarantees a visible difference and makes the shrinking process reliable.
+            if (text.length > LONG_MESSAGE_THRESHOLD) {
+                messageEl.style.fontSize = '22px';
+            }
+            // *** END OF NEW LOGIC ***
 
-            const wrapper = document.createElement('div');
-            wrapper.className = 'content-wrapper';
-            wrapper.appendChild(combinedContentWrapper);
-            displayArea.appendChild(wrapper);
-            
-            adjustFontSize(messageEl);
-            adjustFontSize(recipientEl);
+            shoutoutContent.append(recipientEl, messageEl);
+            await runStep(shoutoutContent, SHOUTOUT_DISPLAY_TIME, true);
 
-            setTimeout(() => {
-                wrapper.classList.add('visible');
-                triggerConfetti();
-            }, 100);
-
-            setTimeout(() => {
-                wrapper.classList.remove('visible');
-                setTimeout(() => {
-                    displayArea.innerHTML = '';
-                    resolve();
-                }, FADE_TIME);
-            }, SHOUTOUT_DISPLAY_TIME);
-        });
-
-        const tags = item.command.match(/#BeDifferent|#BringTheWow|#BuildSomethingGreatTogether/g) || [];
-        if (tags.length > 0) {
-            const footerEl = document.createElement('div');
-            footerEl.className = 'footer-content';
-
-            const hashtagContainer = document.createElement('div');
-            hashtagContainer.className = 'hashtag-container';
-            tags.forEach(tag => {
-                const hashtagEl = document.createElement('div');
-                hashtagEl.className = 'hashtag-word';
-                let formattedTag = tag.replace(/([A-Z])/g, ' $1').trim();
-                hashtagEl.textContent = formattedTag;
-                
-                if (tag === '#BeDifferent') hashtagEl.classList.add('hashtag-be-different');
-                else if (tag === '#BringTheWow') hashtagEl.classList.add('hashtag-bring-wow');
-                else if (tag === '#BuildSomethingGreatTogether') hashtagEl.classList.add('hashtag-build-great');
-
-                hashtagContainer.appendChild(hashtagEl);
-            });
-            footerEl.appendChild(hashtagContainer);
-
+            if (tags.length > 0) {
+                const footerEl = document.createElement('div');
+                footerEl.className = 'footer-content';
+                const hashtagContainer = document.createElement('div');
+                hashtagContainer.className = 'hashtag-container';
+                tags.forEach(tag => hashtagContainer.appendChild(createHashtagEl(tag)));
+                const senderEl = document.createElement('div');
+                senderEl.className = 'sender';
+                senderEl.textContent = senderName;
+                footerEl.append(hashtagContainer, senderEl);
+                await runStep(footerEl, SENDER_DISPLAY_TIME, true);
+            }
+        } else {
+            const combinedContent = document.createElement('div');
+            combinedContent.className = 'footer-content';
+            const recipientEl = document.createElement('div');
+            recipientEl.className = 'recipient';
+            recipientEl.textContent = recipientName;
+            combinedContent.appendChild(recipientEl);
+            if (tags.length > 0) {
+                const hashtagContainer = document.createElement('div');
+                hashtagContainer.className = 'hashtag-container';
+                tags.forEach(tag => hashtagContainer.appendChild(createHashtagEl(tag)));
+                combinedContent.appendChild(hashtagContainer);
+            }
             const senderEl = document.createElement('div');
             senderEl.className = 'sender';
-            senderEl.textContent = `— ${item.sender.first_name}${item.sender.last_name ? ' ' + item.sender.last_name : ''}`;
-            footerEl.appendChild(senderEl);
-
-            await runStep(footerEl, SENDER_DISPLAY_TIME, true);
+            senderEl.textContent = senderName;
+            combinedContent.appendChild(senderEl);
+            await runStep(combinedContent, SHOUTOUT_DISPLAY_TIME, true);
         }
     }
 
-    // MODIFIED: This function now waits for the background color transition to finish
-    // before showing the GIF, preventing a visual glitch.
     function playGifAnimation() {
         return new Promise(resolve => {
             const displayArea = document.getElementById('display-area');
-            const backgroundTransitionDuration = 500; // This must match the CSS transition time for the body
-
-            // Start the background transition to white
+            const backgroundTransitionDuration = 500;
             document.body.style.backgroundColor = '#ffffff';
-
-            // Wait for the background to turn fully white before proceeding
             setTimeout(() => {
                 displayArea.innerHTML = '';
-
                 const wrapper = document.createElement('div');
                 wrapper.className = 'content-wrapper';
-
                 const gif = document.createElement('img');
                 gif.src = 'https://raw.githubusercontent.com/pwalkrrs/rrsnectarmini/main/nectarmini.gif?t=' + Date.now();
-                
                 wrapper.appendChild(gif);
                 displayArea.appendChild(wrapper);
-
-                // Fade in the GIF
-                setTimeout(() => {
-                    wrapper.classList.add('visible');
-                }, 100);
-
-                // Set a timer to fade out the GIF
+                setTimeout(() => { wrapper.classList.add('visible'); }, 100);
                 setTimeout(() => {
                     wrapper.classList.remove('visible');
-
-                    // After the fade out, change the background color back to orange
                     setTimeout(() => {
                         document.body.style.backgroundColor = '#f55838';
                         displayArea.innerHTML = '';
                         resolve();
                     }, FADE_TIME);
                 }, GIF_DISPLAY_TIME);
-
             }, backgroundTransitionDuration);
         });
     }
@@ -329,34 +318,24 @@
       if (idx >= shoutouts.length) {
         idx = 0;
         await fetchShoutouts();
-
         if (shoutouts.length === 0) {
-            console.log(`No shoutouts. Retrying in ${RETRY_DELAY / 1000}s.`);
             setTimeout(cycle, RETRY_DELAY);
             return;
         }
       }
-
       const item = shoutouts[idx];
-      console.log(`Showing shoutout ${idx + 1}/${shoutouts.length}`);
-      
       await showShoutout(item);
-      
       await playGifAnimation();
-      
       idx++;
       cycle();
     }
 
     window.addEventListener('load', () => {
-      console.log('Culture Feed Sidebar Display started'); 
       cycle();
-
       document.body.addEventListener('click', () => {
         window.open('https://app.nectarhr.com/login', '_blank');
       });
     });
-    
   </script>
 </body>
 </html>
