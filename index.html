@@ -139,7 +139,7 @@
   <script>
     const companyId = 'e62a5679-4687-4594-ab2a-efc7da2872c9';
     const aNectarToken = 'YOUR_JWT_HERE';
-    const endpoint = `https://integrations.nectarhr.com/culture-feed?companyId=${companyId}`;
+    const baseEndpoint = `https://integrations.nectarhr.com/culture-feed?companyId=${companyId}`;
     const headers = { 'Accept': 'application/json', 'a_nectar': aNectarToken };
 
     const SHOUTOUT_DISPLAY_TIME = 7500;
@@ -148,25 +148,40 @@
     const RETRY_DELAY = 5000;
     const GIF_DISPLAY_TIME = 2000;
     const MIN_FONT_SIZE = 8;
-    // NEW: A character threshold to trigger the aggressive shrinking.
     const LONG_MESSAGE_THRESHOLD = 200;
+    // --- LOGIC APPLIED FROM SOURCE FILE ---
+    const FETCH_LIMIT = 40;
 
     let shoutouts = [], idx = 0;
     let isFetching = false;
+    let fetchOffset = 0;
+    // --- END OF APPLIED LOGIC ---
 
-    async function fetchShoutouts() {
-      if (isFetching) return;
+    // --- MODIFIED: fetchShoutouts now handles pagination and filtering ---
+    async function fetchShoutouts(offset = 0) {
+      if (isFetching) return { displayable: [], exhausted: false };
       isFetching = true;
-      try { 
-        const timestamp = Date.now(); 
-        const urlWithCacheBuster = `${endpoint}&_t=${timestamp}`; 
-        const res = await fetch(urlWithCacheBuster, { headers: { ...headers, 'Cache-Control': 'no-cache' } }); 
-        if (!res.ok) throw new Error(`HTTP Status: ${res.status}`); 
+      console.log(`Fetching new shoutouts, skipping ${offset}...`);
+      try {
+        const timestamp = Date.now();
+        const urlWithParams = `${baseEndpoint}&limit=${FETCH_LIMIT}&offset=${offset}&_t=${timestamp}`;
+        const res = await fetch(urlWithParams, {
+          headers: { ...headers, 'Cache-Control': 'no-cache', 'Pragma': 'no-cache', 'Expires': '0' }
+        });
+        if (!res.ok) throw new Error(`HTTP Status: ${res.status}`);
         const data = await res.json();
-        shoutouts = (data.shoutouts && data.shoutouts.length > 0) ? data.shoutouts : [];
-      } catch (e) { 
-        console.error('Fetch error:', e); 
-        shoutouts = [];
+
+        if (!data.shoutouts || data.shoutouts.length === 0) {
+            console.log('API returned no more shoutouts. Feed is exhausted.');
+            return { displayable: [], exhausted: true };
+        }
+
+        const filteredShoutouts = data.shoutouts.filter(s => s.type !== 'Birthday_Shoutout' && s.type !== 'Anniversary_Shoutout');
+        console.log(`Fetched ${data.shoutouts.length} items, ${filteredShoutouts.length} are displayable.`);
+        return { displayable: filteredShoutouts, exhausted: false };
+      } catch (e) {
+        console.error('Fetch error:', e);
+        return { displayable: [], exhausted: false };
       } finally {
         isFetching = false;
       }
@@ -244,13 +259,9 @@
             messageEl.className = 'message-text';
             messageEl.textContent = text;
             
-            // *** NEW, DIRECT LOGIC ***
-            // If the message is very long, force a much smaller font size as a starting point.
-            // This guarantees a visible difference and makes the shrinking process reliable.
             if (text.length > LONG_MESSAGE_THRESHOLD) {
                 messageEl.style.fontSize = '22px';
             }
-            // *** END OF NEW LOGIC ***
 
             shoutoutContent.append(recipientEl, messageEl);
             await runStep(shoutoutContent, SHOUTOUT_DISPLAY_TIME, true);
@@ -314,23 +325,55 @@
         });
     }
 
+    // --- NEW: loadNextBatch function from source logic ---
+    async function loadNextBatch() {
+        let newShoutouts = [];
+        while (newShoutouts.length === 0) {
+            const result = await fetchShoutouts(fetchOffset);
+
+            if (result.exhausted) {
+                console.log('Reached the end of the feed. Restarting from the beginning.');
+                fetchOffset = 0; 
+                setTimeout(cycle, RETRY_DELAY); 
+                return; 
+            }
+            
+            newShoutouts = result.displayable;
+            fetchOffset += FETCH_LIMIT; 
+
+            if (newShoutouts.length === 0) {
+                console.log('Current batch had no displayable shoutouts. Fetching next batch immediately...');
+            }
+        }
+
+        shoutouts = newShoutouts;
+        idx = 0;
+        cycle(); 
+    }
+
+    // --- MODIFIED: cycle function now uses loadNextBatch ---
     async function cycle() {
       if (idx >= shoutouts.length) {
-        idx = 0;
-        await fetchShoutouts();
-        if (shoutouts.length === 0) {
-            setTimeout(cycle, RETRY_DELAY);
+        await loadNextBatch();
+      } else {
+        const item = shoutouts[idx];
+         // Safety check for malformed data
+        if (!item || !item.sender || !item.mentionsData) {
+            console.warn('Skipping malformed shoutout item:', item);
+            idx++;
+            cycle();
             return;
         }
+        console.log(`Showing shoutout ${idx + 1}/${shoutouts.length} from batch starting at offset ${fetchOffset - FETCH_LIMIT}`);
+        await showShoutout(item);
+        await playGifAnimation();
+        idx++;
+        cycle();
       }
-      const item = shoutouts[idx];
-      await showShoutout(item);
-      await playGifAnimation();
-      idx++;
-      cycle();
     }
 
     window.addEventListener('load', () => {
+      console.log('Culture Feed Display started');
       cycle();
       document.body.addEventListener('click', () => {
         window.open('https://app.nectarhr.com/login', '_blank');
